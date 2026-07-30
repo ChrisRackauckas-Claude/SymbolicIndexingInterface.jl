@@ -21,5 +21,4 @@ run_qa(
         all_qualified_accesses_are_public = (; ignore = (:init, :ismutable, :Fix1)),
         all_explicit_imports_are_public = (; ignore = (:similar_type,)),
     ),
-    api_docs_kwargs = (; rendered = true),
 )

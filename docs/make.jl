@@ -9,7 +9,7 @@ makedocs(
     sitename = "SymbolicIndexingInterface.jl",
     authors = "Chris Rackauckas",
     modules = [SymbolicIndexingInterface],
-    clean = true, doctest = false,
+    clean = true,
     format = Documenter.HTML(
         analytics = "UA-90474609-3",
         assets = ["assets/favicon.ico"],
