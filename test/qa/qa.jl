@@ -6,6 +6,12 @@ using Test
 # load every weakdep here to bring the extensions into the QA scan.
 using PrettyTables
 
+# ExplicitImports silently skips an extension that fails to load, so assert the
+# extension modules actually exist rather than trusting a green run_qa.
+@testset "Extensions loaded" begin
+    @test Base.get_extension(SymbolicIndexingInterface, :SymbolicIndexingInterfacePrettyTablesExt) !== nothing
+end
+
 # ExplicitImports per-check ignore-lists: each entry is a dependency name that is
 # genuinely required but is neither exported nor declared `public` by its owner
 # package, and has no public alternative to switch to.
