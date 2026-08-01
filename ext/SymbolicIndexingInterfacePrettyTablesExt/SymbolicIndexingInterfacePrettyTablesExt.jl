@@ -3,7 +3,7 @@ module SymbolicIndexingInterfacePrettyTablesExt
 using SymbolicIndexingInterface
 using SymbolicIndexingInterface: ParameterIndexingProxy, parameter_symbols, symbolic_type,
     ArraySymbolic, getp
-using PrettyTables
+using PrettyTables: PrettyTables, pretty_table
 
 # Override the fallback implementation with the PrettyTables version
 function SymbolicIndexingInterface.show_params(
