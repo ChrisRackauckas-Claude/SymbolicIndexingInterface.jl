@@ -243,7 +243,54 @@ struct OOPSetter{S, I, D}
     idxs::D
 end
 
-OOPSetter(indp, idxs, isstate) = OOPSetter{isstate, typeof(indp), typeof(idxs)}(indp, idxs)
+"""
+    TypeGroupedIndexes(idxs::AbstractVector)
+
+Indexes from an abstractly-typed vector partitioned into concretely typed
+groups, preserving first-occurrence order. Each group is a tuple of the
+concretely typed index vector and the positions of its entries in the
+original collection. `remake_buffer` implementations that compute buffer
+eltype promotion from `eltype(idxs)` (e.g. for `MTKParameters`) require
+concretely typed index collections; applying `remake_buffer` once per group
+satisfies that without splatting the indexes into a `Tuple`, whose length
+would scale codegen with the number of indexes.
+"""
+struct TypeGroupedIndexes{G <: Tuple}
+    groups::G
+end
+
+function TypeGroupedIndexes(idxs::AbstractVector)
+    group_idxs = []
+    group_positions = Vector{Int}[]
+    for (i, idx) in enumerate(idxs)
+        gi = findfirst(g -> typeof(first(g)) == typeof(idx), group_idxs)
+        if gi === nothing
+            push!(group_idxs, [idx])
+            push!(group_positions, [i])
+        else
+            push!(group_idxs[gi], idx)
+            push!(group_positions[gi], i)
+        end
+    end
+    return TypeGroupedIndexes(Tuple(map(tuple, group_idxs, group_positions)))
+end
+
+function OOPSetter(indp, idxs, isstate)
+    if idxs isa AbstractVector && !isconcretetype(eltype(idxs)) && !isempty(idxs)
+        idxs = TypeGroupedIndexes(idxs)
+    end
+    return OOPSetter{isstate, typeof(indp), typeof(idxs)}(indp, idxs)
+end
+
+_subset_values(val::AbstractArray, positions) = val[positions]
+_subset_values(val::Tuple, positions) = map(Base.Fix1(getindex, val), Tuple(positions))
+
+_remake_buffer_grouped(indp, buffer, ::Tuple{}, val) = buffer
+function _remake_buffer_grouped(indp, buffer, groups::Tuple, val)
+    idxs, positions = first(groups)
+    buffer = remake_buffer(indp, buffer, idxs, _subset_values(val, positions))
+    return _remake_buffer_grouped(indp, buffer, Base.tail(groups), val)
+end
 
 function (os::OOPSetter{true})(valp, val)
     buffer = hasmethod(state_values, Tuple{typeof(valp)}) ? state_values(valp) : valp
@@ -273,6 +320,21 @@ function (os::OOPSetter{false})(valp, val::Union{Tuple, AbstractArray})
     else
         return remake_buffer(os.indp, buffer, (os.idxs,), (val,))
     end
+end
+
+function (os::OOPSetter{true, I, <:TypeGroupedIndexes})(
+        valp, val::Union{Tuple, AbstractArray}
+    ) where {I}
+    buffer = hasmethod(state_values, Tuple{typeof(valp)}) ? state_values(valp) : valp
+    return _remake_buffer_grouped(os.indp, buffer, os.idxs.groups, val)
+end
+
+function (os::OOPSetter{false, I, <:TypeGroupedIndexes})(
+        valp, val::Union{Tuple, AbstractArray}
+    ) where {I}
+    buffer = hasmethod(parameter_values, Tuple{typeof(valp)}) ? parameter_values(valp) :
+        valp
+    return _remake_buffer_grouped(os.indp, buffer, os.idxs.groups, val)
 end
 
 function _root_indp(indp)

@@ -316,6 +316,41 @@ function setsym_oop(bi::BatchedInterface)
     arg = :vals
     full_update = Expr(:block)
 
+    function push_remake_expr!(curexpr, outsym, sys_i, buffer_expr, idxs, vals_idxs, prefix)
+        idxs = identity.(idxs)
+        if isconcretetype(eltype(idxs))
+            idxssym = Symbol(prefix, :_idxs_, sys_i)
+            valssym = Symbol(prefix, :_vals_, sys_i)
+            push!(curexpr.args, :($idxssym = $idxs))
+            push!(curexpr.args, :($valssym = $view($arg, $vals_idxs)))
+            push!(
+                curexpr.args,
+                :(
+                    $outsym = $remake_buffer(
+                        syss[$sys_i], $buffer_expr, $idxssym, $valssym
+                    )
+                )
+            )
+        else
+            # mixed index types: apply `remake_buffer` once per concretely typed
+            # group, since implementations that promote buffer eltypes from
+            # `eltype(idxs)` require concrete index collections
+            push!(curexpr.args, :($outsym = $buffer_expr))
+            for (gidxs, positions) in TypeGroupedIndexes(idxs).groups
+                push!(
+                    curexpr.args,
+                    :(
+                        $outsym = $remake_buffer(
+                            syss[$sys_i], $outsym, $gidxs,
+                            $view($arg, $(vals_idxs[positions]))
+                        )
+                    )
+                )
+            end
+        end
+        return nothing
+    end
+
     function get_update_expr(prob::Symbol, sys_i::Int)
         union_idxs = bi.system_to_symbol_subset[sys_i]
         indp_idxs = bi.system_to_symbol_indexes[sys_i]
@@ -327,19 +362,9 @@ function setsym_oop(bi::BatchedInterface)
         if all(.!isstate)
             push!(curexpr.args, :($statessym = $state_values($prob)))
         else
-            state_idxssym = Symbol(:state_idxs_, sys_i)
-            state_idxs = indp_idxs[isstate]
-            state_valssym = Symbol(:state_vals_, sys_i)
-            vals_idxs = union_idxs[isstate]
-            push!(curexpr.args, :($state_idxssym = $state_idxs))
-            push!(curexpr.args, :($state_valssym = $view($arg, $vals_idxs)))
-            push!(
-                curexpr.args,
-                :(
-                    $statessym = $remake_buffer(
-                        syss[$sys_i], $state_values($prob), $state_idxssym, $state_valssym
-                    )
-                )
+            push_remake_expr!(
+                curexpr, statessym, sys_i, :($state_values($prob)),
+                indp_idxs[isstate], union_idxs[isstate], :state
             )
         end
 
@@ -347,19 +372,9 @@ function setsym_oop(bi::BatchedInterface)
         if all(isstate)
             push!(curexpr.args, :($paramssym = $parameter_values($prob)))
         else
-            param_idxssym = Symbol(:param_idxs_, sys_i)
-            param_idxs = indp_idxs[.!isstate]
-            param_valssym = Symbol(:param_vals, sys_i)
-            vals_idxs = union_idxs[.!isstate]
-            push!(curexpr.args, :($param_idxssym = $param_idxs))
-            push!(curexpr.args, :($param_valssym = $view($arg, $vals_idxs)))
-            push!(
-                curexpr.args,
-                :(
-                    $paramssym = $remake_buffer(
-                        syss[$sys_i], $parameter_values($prob), $param_idxssym, $param_valssym
-                    )
-                )
+            push_remake_expr!(
+                curexpr, paramssym, sys_i, :($parameter_values($prob)),
+                indp_idxs[.!isstate], union_idxs[.!isstate], :param
             )
         end
 
