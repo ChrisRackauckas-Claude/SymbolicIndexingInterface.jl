@@ -142,7 +142,16 @@ end
 function (o::TimeDependentObservedFunction)(
         ::Timeseries, ::IndexerMixedTimeseries, prob, args...
     )
-    throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    mapfn = let inner = o.obsfn, indp = prob, valp = prob
+        function __mapfn(u, t)
+            cur_p = parameter_values_at_time(indp, valp, t)
+            return inner(u, cur_p, t)
+        end
+    end
+    return map(mapfn, state_values(prob), current_time(prob))
 end
 function (o::TimeDependentObservedFunction)(
         ::NotTimeseries, ::IndexerMixedTimeseries, prob, args...
