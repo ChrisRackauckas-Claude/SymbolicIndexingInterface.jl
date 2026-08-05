@@ -283,7 +283,7 @@ function OOPSetter(indp, idxs, isstate)
 end
 
 _subset_values(val::AbstractArray, positions) = val[positions]
-_subset_values(val::Tuple, positions) = map(Base.Fix1(getindex, val), Tuple(positions))
+_subset_values(val::Tuple, positions) = ntuple(Base.Fix1(getindex, val) ∘ Base.Fix1(getindex, positions), Val(length(val)))
 
 _remake_buffer_grouped(indp, buffer, ::Tuple{}, val) = buffer
 function _remake_buffer_grouped(indp, buffer, groups::Tuple, val)
