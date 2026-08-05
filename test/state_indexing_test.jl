@@ -1,5 +1,7 @@
 using SymbolicIndexingInterface
-using SymbolicIndexingInterface: NotVariableOrParameter
+using SymbolicIndexingInterface: NotVariableOrParameter, IndexerMixedTimeseries,
+    is_indexer_timeseries, MixedParameterTimeseriesIndexError, parameter_values_at_time,
+    TimeDependentObservedFunction
 # AllocCheck uses LLVM introspection which can break on pre-release Julia versions
 @static if isempty(VERSION.prerelease)
     using AllocCheck
@@ -491,4 +493,95 @@ SymbolicIndexingInterface.supports_tuple_observed(::TupleObservedWrapper) = true
     @test all(getter(ps) .≈ (0.3, 0.5))
     @test getter(ps) isa Tuple
     @test_nowarn @inferred getter(ps)
+end
+
+struct MixedTSDiffEqArray
+    t::Vector{Float64}
+    u::Vector{Vector{Float64}}
+end
+SymbolicIndexingInterface.current_time(mda::MixedTSDiffEqArray) = mda.t
+SymbolicIndexingInterface.state_values(mda::MixedTSDiffEqArray) = mda.u
+SymbolicIndexingInterface.is_timeseries(::Type{MixedTSDiffEqArray}) = Timeseries()
+
+struct MixedTSParameterObject
+    p::Vector{Float64}
+end
+SymbolicIndexingInterface.parameter_values(mpo::MixedTSParameterObject) = mpo.p
+function SymbolicIndexingInterface.with_updated_parameter_timeseries_values(
+        ::SymbolCache, mpo::MixedTSParameterObject, args::Pair...
+    )
+    for (ts_idx, val) in args
+        mpo.p[1 + ts_idx] = only(val)
+    end
+    return mpo
+end
+Base.getindex(mpo::MixedTSParameterObject, i) = mpo.p[i]
+
+# A timeseries solution object with both continuous states and a parameter
+# timeseries, used to test indexing observed variables that mix the two.
+struct MixedTSSolution{S}
+    sys::S
+    u::Vector{Vector{Float64}}
+    t::Vector{Float64}
+    p::MixedTSParameterObject
+    p_ts::ParameterTimeseriesCollection
+end
+SymbolicIndexingInterface.state_values(fs::MixedTSSolution) = fs.u
+SymbolicIndexingInterface.current_time(fs::MixedTSSolution) = fs.t
+SymbolicIndexingInterface.symbolic_container(fs::MixedTSSolution) = fs.sys
+SymbolicIndexingInterface.parameter_values(fs::MixedTSSolution) = fs.p
+SymbolicIndexingInterface.parameter_values(fs::MixedTSSolution, i) = fs.p[i]
+SymbolicIndexingInterface.get_parameter_timeseries_collection(fs::MixedTSSolution) = fs.p_ts
+SymbolicIndexingInterface.is_timeseries(::Type{<:MixedTSSolution}) = Timeseries()
+SymbolicIndexingInterface.is_parameter_timeseries(::Type{<:MixedTSSolution}) = Timeseries()
+SymbolicIndexingInterface.get_history_function(fs::MixedTSSolution) = t -> t .* ones(3)
+
+@testset "Indexing mixed timeseries vars when one is continuous" begin
+    sc = SymbolCache(
+        [:x, :y, :z], [:a, :b], :t;
+        timeseries_parameters = Dict(:b => ParameterTimeseriesIndex(1, 1))
+    )
+    b_ts = MixedTSDiffEqArray(collect(0.0:0.1:0.9), [[2.5i] for i in 1:10])
+    p0 = MixedTSParameterObject([20.0, b_ts.u[end][1]])
+
+    for sys in [sc, NonMarkovianWrapper(sc)]
+        markovian = sys === sc
+        u = [i * ones(3) for i in 1:5]
+        t = [0.2i for i in 1:5]
+        ptc = ParameterTimeseriesCollection([deepcopy(b_ts)], deepcopy(p0))
+        fs = MixedTSSolution(sys, u, t, deepcopy(p0), ptc)
+
+        xval = getindex.(fs.u, 1)
+        bval_at_t = [parameter_values_at_time(sys, fs, ti)[2] for ti in fs.t]
+        # `NonMarkovianWrapper`'s observed function adds `h(t - 0.1)` to the
+        # state before calling the underlying observed function.
+        hval_at_t = markovian ? zeros(length(fs.t)) : [ti - 0.1 for ti in fs.t]
+        expected = xval .+ hval_at_t .+ bval_at_t
+
+        getter = getsym(sys, :(x + b))
+        @test is_indexer_timeseries(getter) == IndexerMixedTimeseries()
+        @test getter(fs) ≈ expected
+        for subidx in [
+                1, CartesianIndex(2), :, rand(Bool, length(fs.t)),
+                rand(eachindex(fs.t), 3), 1:3,
+            ]
+            target = subidx isa Colon ? expected : expected[subidx]
+            @test getter(fs, subidx) ≈ target
+        end
+    end
+
+    # A `TimeDependentObservedFunction` is only ever constructed by `getsym`
+    # when its combined timeseries indexes include `ContinuousTimeseries()`
+    # (that's the only case where it makes sense to hold parameter timeseries
+    # values fixed while iterating over the continuous timeseries). Directly
+    # constructing one without `ContinuousTimeseries()` in `ts_idxs` should
+    # still throw, since there is no continuous timeseries to iterate over.
+    o = TimeDependentObservedFunction{true}([1, 2], (u, p, t) -> u[1] + p[2])
+    b_ts = MixedTSDiffEqArray(collect(0.0:0.1:0.9), [[2.5i] for i in 1:10])
+    p0 = MixedTSParameterObject([20.0, b_ts.u[end][1]])
+    fs = MixedTSSolution(
+        sc, [i * ones(3) for i in 1:5], [0.2i for i in 1:5], deepcopy(p0),
+        ParameterTimeseriesCollection([deepcopy(b_ts)], deepcopy(p0))
+    )
+    @test_throws MixedParameterTimeseriesIndexError o(Timeseries(), fs)
 end
