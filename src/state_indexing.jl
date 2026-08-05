@@ -139,9 +139,7 @@ function (o::NonMarkovianObservedFunction)(::NotTimeseries, ::IndexerBoth, prob)
     )
 end
 
-function (o::TimeDependentObservedFunction)(
-        ::Timeseries, ::IndexerMixedTimeseries, prob, args...
-    )
+function (o::TimeDependentObservedFunction)(::Timeseries, ::IndexerMixedTimeseries, prob)
     if !(ContinuousTimeseries() in o.ts_idxs)
         throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
     end
@@ -152,6 +150,53 @@ function (o::TimeDependentObservedFunction)(
         end
     end
     return map(mapfn, state_values(prob), current_time(prob))
+end
+function (o::NonMarkovianObservedFunction)(::Timeseries, ::IndexerMixedTimeseries, prob)
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    mapfn = let inner = o.obsfn, indp = prob, valp = prob, h = get_history_function(prob)
+        function __mapfn(u, t)
+            cur_p = parameter_values_at_time(indp, valp, t)
+            return inner(u, h, cur_p, t)
+        end
+    end
+    return map(mapfn, state_values(prob), current_time(prob))
+end
+function (o::TimeDependentObservedFunction)(
+        ::Timeseries, ::IndexerMixedTimeseries, prob, i::Union{Int, CartesianIndex}
+    )
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    t = current_time(prob, i)
+    cur_p = parameter_values_at_time(prob, prob, t)
+    return o.obsfn(state_values(prob, i), cur_p, t)
+end
+function (o::NonMarkovianObservedFunction)(
+        ::Timeseries, ::IndexerMixedTimeseries, prob, i::Union{Int, CartesianIndex}
+    )
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    t = current_time(prob, i)
+    cur_p = parameter_values_at_time(prob, prob, t)
+    return o.obsfn(state_values(prob, i), get_history_function(prob), cur_p, t)
+end
+function (o::TimeDependentObservedFunction)(
+        ts::Timeseries, ::IndexerMixedTimeseries, prob, ::Colon
+    )
+    return o(ts, prob)
+end
+function (o::TimeDependentObservedFunction)(
+        ts::Timeseries, ::IndexerMixedTimeseries, prob, i::AbstractArray{Bool}
+    )
+    return map(only(to_indices(current_time(prob), (i,)))) do idx
+        o(ts, prob, idx)
+    end
+end
+function (o::TimeDependentObservedFunction)(ts::Timeseries, ::IndexerMixedTimeseries, prob, i)
+    return o.((ts,), (prob,), i)
 end
 function (o::TimeDependentObservedFunction)(
         ::NotTimeseries, ::IndexerMixedTimeseries, prob, args...
