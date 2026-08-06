@@ -248,15 +248,23 @@ end
 
 Indexes from an abstractly-typed vector partitioned into concretely typed
 groups, preserving first-occurrence order. Each group is a tuple of the
-concretely typed index vector and the positions of its entries in the
-original collection. `remake_buffer` implementations that compute buffer
-eltype promotion from `eltype(idxs)` (e.g. for `MTKParameters`) require
-concretely typed index collections; applying `remake_buffer` once per group
-satisfies that without splatting the indexes into a `Tuple`, whose length
-would scale codegen with the number of indexes.
+concretely typed index vector, the positions of its entries in the original
+collection, and the same positions encoded as a `Val` so `Tuple`s of values
+can be subset type-stably. `remake_buffer` implementations that compute
+buffer eltype promotion from `eltype(idxs)` (e.g. for `MTKParameters`)
+require concretely typed index collections; applying `remake_buffer` once
+per group satisfies that without splatting the indexes into a `Tuple`, whose
+length would scale codegen with the number of indexes.
 """
 struct TypeGroupedIndexes{G <: Tuple}
     groups::G
+end
+
+# Contiguous position runs are stored as a `UnitRange` so their `Val`-encoded
+# form does not scale the setter's type size with the number of indexes.
+function _compact_positions(positions::Vector{Int})
+    r = first(positions):last(positions)
+    return positions == r ? r : positions
 end
 
 function TypeGroupedIndexes(idxs::AbstractVector)
@@ -272,7 +280,11 @@ function TypeGroupedIndexes(idxs::AbstractVector)
             push!(group_positions[gi], i)
         end
     end
-    return TypeGroupedIndexes(Tuple(map(tuple, group_idxs, group_positions)))
+    groups = map(group_idxs, group_positions) do gidxs, positions
+        positions = _compact_positions(positions)
+        (gidxs, positions, Val(positions isa UnitRange ? positions : Tuple(positions)))
+    end
+    return TypeGroupedIndexes(Tuple(groups))
 end
 
 function OOPSetter(indp, idxs, isstate)
@@ -282,13 +294,18 @@ function OOPSetter(indp, idxs, isstate)
     return OOPSetter{isstate, typeof(indp), typeof(idxs)}(indp, idxs)
 end
 
-_subset_values(val::AbstractArray, positions) = val[positions]
-_subset_values(val::Tuple, positions) = ntuple(Base.Fix1(getindex, val) ∘ Base.Fix1(getindex, positions), Val(length(val)))
+_subset_values(val::AbstractArray, positions, _) = val[positions]
+# subsetting a (possibly heterogeneous) `Tuple` of values is only inferrable
+# with the positions available as compile-time constants, hence the `Val`
+function _subset_values(val::Tuple, positions, ::Val{P}) where {P}
+    return ntuple(i -> val[P[i]], Val(length(P)))
+end
 
 _remake_buffer_grouped(indp, buffer, ::Tuple{}, val) = buffer
 function _remake_buffer_grouped(indp, buffer, groups::Tuple, val)
-    idxs, positions = first(groups)
-    buffer = remake_buffer(indp, buffer, idxs, _subset_values(val, positions))
+    idxs, positions, static_positions = first(groups)
+    vals = _subset_values(val, positions, static_positions)
+    buffer = remake_buffer(indp, buffer, idxs, vals)
     return _remake_buffer_grouped(indp, buffer, Base.tail(groups), val)
 end
 

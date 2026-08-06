@@ -336,7 +336,7 @@ function setsym_oop(bi::BatchedInterface)
             # group, since implementations that promote buffer eltypes from
             # `eltype(idxs)` require concrete index collections
             push!(curexpr.args, :($outsym = $buffer_expr))
-            for (gidxs, positions) in TypeGroupedIndexes(idxs).groups
+            for (gidxs, positions, _) in TypeGroupedIndexes(idxs).groups
                 push!(
                     curexpr.args,
                     :(
