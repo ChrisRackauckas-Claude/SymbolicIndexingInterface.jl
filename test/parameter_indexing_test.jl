@@ -3,7 +3,7 @@ using SymbolicIndexingInterface: IndexerOnlyTimeseries, IndexerNotTimeseries, In
     IndexerMixedTimeseries,
     is_indexer_timeseries, indexer_timeseries_index,
     ParameterTimeseriesValueIndexMismatchError,
-    MixedParameterTimeseriesIndexError
+    MixedParameterTimeseriesIndexError, parameter_values_at_time
 using Test
 # AllocCheck uses LLVM introspection which can break on pre-release Julia versions
 @static if isempty(VERSION.prerelease)
@@ -555,18 +555,56 @@ temp_state = ProblemState(;
 _xval = temp_state.u[1]
 _bval = bval[1]
 _cval = cval[1]
+
+# These getters go through `MultipleGetters`, which always throws when mixing
+# timeseries indexes (state variables and parameter timeseries are always
+# considered separate indexes), regardless of whether one of them is the
+# continuous timeseries.
 for (sym, val, check_inference) in [
         ([:x, :b], [_xval, _bval], false),
         ((:x, :c), (_xval, _cval), true),
-        (:(x + b), _xval + _bval, true),
-        ([:(2b), :(3x)], [2_bval, 3_xval], true),
-        ((:(2b), :(3x)), (2_bval, 3_xval), true),
     ]
     getter = getsym(sys, sym)
     @test_throws MixedParameterTimeseriesIndexError getter(fs)
     for subidx in [1, CartesianIndex(2), :, rand(Bool, 4), rand(1:4, 3), 1:2]
         @test_throws MixedParameterTimeseriesIndexError getter(fs, subidx)
     end
+    if check_inference
+        @inferred getter(temp_state)
+    end
+    @test getter(temp_state) == val
+end
+
+# These getters go through `TimeDependentObservedFunction`, whose combined
+# timeseries indexes include `ContinuousTimeseries()` (since they involve `x`,
+# a continuous state variable). Indexing with such a getter on the full
+# timeseries object is now allowed, and evaluates the observed function at
+# the interpolated/held parameter timeseries values corresponding to each
+# point in the continuous timeseries.
+bval_at_t = [parameter_values_at_time(sys, fs, t)[2] for t in fs.t]
+for (sym, val, tsval, check_inference) in [
+        (:(x + b), _xval + _bval, xval .+ bval_at_t, true),
+        ([:(2b), :(3x)], [2_bval, 3_xval], vcat.(2 .* bval_at_t, 3 .* xval), true),
+        ((:(2b), :(3x)), (2_bval, 3_xval), tuple.(2 .* bval_at_t, 3 .* xval), true),
+    ]
+    getter = getsym(sys, sym)
+    if !(sym isa Tuple)
+        # `AsTupleWrapper` (used to wrap tuple-valued observed functions) does
+        # not itself implement `is_indexer_timeseries`.
+        @test is_indexer_timeseries(getter) == IndexerMixedTimeseries()
+    end
+    if check_inference
+        @inferred getter(fs)
+    end
+    @test getter(fs) == tsval
+    for subidx in [1, CartesianIndex(2), :, rand(Bool, length(tsval)), rand(eachindex(tsval), 3), 1:2]
+        if check_inference
+            @inferred getter(fs, subidx)
+        end
+        target = subidx isa Colon ? tsval : tsval[subidx]
+        @test getter(fs, subidx) == target
+    end
+
     if check_inference
         @inferred getter(temp_state)
     end
