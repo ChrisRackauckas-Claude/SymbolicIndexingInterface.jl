@@ -41,7 +41,11 @@ function (gsi::GetStateIndex)(::Timeseries, prob, i::Union{Int, CartesianIndex})
     return getindex(state_values(prob, i), gsi.idx)
 end
 function (gsi::GetStateIndex)(::Timeseries, prob, i)
-    return getindex.(state_values(prob, i), gsi.idx)
+    # Wrap `gsi.idx` in a 1-tuple so it broadcasts as a scalar across the
+    # `state_values(prob, i)` collection. Without the wrap, an array-valued
+    # `gsi.idx` (e.g. `Vector{Int}` from an array-symbolic) is broadcast
+    # element-wise and errors with a shape mismatch against the time axis.
+    return getindex.(state_values(prob, i), (gsi.idx,))
 end
 function (gsi::GetStateIndex)(::NotTimeseries, prob)
     return state_values(prob, gsi.idx)
@@ -135,10 +139,64 @@ function (o::NonMarkovianObservedFunction)(::NotTimeseries, ::IndexerBoth, prob)
     )
 end
 
+function (o::TimeDependentObservedFunction)(::Timeseries, ::IndexerMixedTimeseries, prob)
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    mapfn = let inner = o.obsfn, indp = prob, valp = prob
+        function __mapfn(u, t)
+            cur_p = parameter_values_at_time(indp, valp, t)
+            return inner(u, cur_p, t)
+        end
+    end
+    return map(mapfn, state_values(prob), current_time(prob))
+end
+function (o::NonMarkovianObservedFunction)(::Timeseries, ::IndexerMixedTimeseries, prob)
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    mapfn = let inner = o.obsfn, indp = prob, valp = prob, h = get_history_function(prob)
+        function __mapfn(u, t)
+            cur_p = parameter_values_at_time(indp, valp, t)
+            return inner(u, h, cur_p, t)
+        end
+    end
+    return map(mapfn, state_values(prob), current_time(prob))
+end
 function (o::TimeDependentObservedFunction)(
-        ::Timeseries, ::IndexerMixedTimeseries, prob, args...
+        ::Timeseries, ::IndexerMixedTimeseries, prob, i::Union{Int, CartesianIndex}
     )
-    throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    t = current_time(prob, i)
+    cur_p = parameter_values_at_time(prob, prob, t)
+    return o.obsfn(state_values(prob, i), cur_p, t)
+end
+function (o::NonMarkovianObservedFunction)(
+        ::Timeseries, ::IndexerMixedTimeseries, prob, i::Union{Int, CartesianIndex}
+    )
+    if !(ContinuousTimeseries() in o.ts_idxs)
+        throw(MixedParameterTimeseriesIndexError(prob, indexer_timeseries_index(o)))
+    end
+    t = current_time(prob, i)
+    cur_p = parameter_values_at_time(prob, prob, t)
+    return o.obsfn(state_values(prob, i), get_history_function(prob), cur_p, t)
+end
+function (o::TimeDependentObservedFunction)(
+        ts::Timeseries, ::IndexerMixedTimeseries, prob, ::Colon
+    )
+    return o(ts, prob)
+end
+function (o::TimeDependentObservedFunction)(
+        ts::Timeseries, ::IndexerMixedTimeseries, prob, i::AbstractArray{Bool}
+    )
+    return map(only(to_indices(current_time(prob), (i,)))) do idx
+        o(ts, prob, idx)
+    end
+end
+function (o::TimeDependentObservedFunction)(ts::Timeseries, ::IndexerMixedTimeseries, prob, i)
+    return o.((ts,), (prob,), i)
 end
 function (o::TimeDependentObservedFunction)(
         ::NotTimeseries, ::IndexerMixedTimeseries, prob, args...
@@ -447,7 +505,18 @@ function _setsym(sys, ::ArraySymbolic, ::SymbolicTypeTrait, sym)
     return setsym(sys, collect(sym))
 end
 
+"""
+    getu(indp, sym)
+
+Compatibility alias for [`getsym`](@ref).
+"""
 const getu = getsym
+
+"""
+    setu(indp, sym)
+
+Compatibility alias for [`setsym`](@ref).
+"""
 const setu = setsym
 
 """
