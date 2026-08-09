@@ -24,8 +24,7 @@ that they be symbolic variables. Thus, any type which implements the new method 
 also support indexes in `idxs`.
 """
 function remake_buffer(sys, oldbuffer::AbstractArray, idxs, vals)
-    # similar when used with an `MArray` and nonconcrete eltype returns a
-    # SizedArray. `similar_type` still returns an `MArray`
+    # `similar` can change an `MArray` into a `SizedArray` for nonconcrete element types.
     if ArrayInterface.ismutable(oldbuffer) && !isa(oldbuffer, MArray)
         elT = Union{}
         for val in vals
@@ -50,7 +49,7 @@ function remake_buffer(sys, oldbuffer::AbstractArray, idxs, vals)
         end
     else
         mutbuffer = remake_buffer(sys, collect(oldbuffer), idxs, vals)
-        newbuffer = similar_type(oldbuffer, eltype(mutbuffer))(mutbuffer)
+        newbuffer = map((_, value) -> value, oldbuffer, mutbuffer)
     end
     return newbuffer
 end

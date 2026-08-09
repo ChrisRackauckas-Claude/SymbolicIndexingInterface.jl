@@ -161,11 +161,11 @@ function get_all_timeseries_indexes(sc::SymbolCache, sym::Expr)
     exs = ExpressionSearcher()
     exs(sc, sym)
     return mapreduce(
-        sym -> get_all_timeseries_indexes(sc, sym), union, exs.declared; init = Set()
+        Base.Fix1(get_all_timeseries_indexes, sc), union, exs.declared; init = Set()
     )
 end
 function get_all_timeseries_indexes(sc::SymbolCache, sym::AbstractArray)
-    return mapreduce(x -> get_all_timeseries_indexes(sc, x), union, sym; init = Set())
+    return mapreduce(Base.Fix1(get_all_timeseries_indexes, sc), union, sym; init = Set())
 end
 function is_independent_variable(sc::SymbolCache, sym)
     sc.independent_variables === nothing && return false

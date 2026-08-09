@@ -1,7 +1,7 @@
 module SymbolicIndexingInterface
 
 using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions, @RuntimeGeneratedFunction
-import StaticArraysCore: MArray, similar_type
+import StaticArraysCore: MArray
 import ArrayInterface
 using Accessors: @reset
 

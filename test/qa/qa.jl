@@ -12,16 +12,4 @@ using PrettyTables
     @test Base.get_extension(SymbolicIndexingInterface, :SymbolicIndexingInterfacePrettyTablesExt) !== nothing
 end
 
-# Julia 1.10 cannot express unexported `public` bindings, so it cannot observe the
-# declarations that current RuntimeGeneratedFunctions and ArrayInterface releases make.
-const QUALIFIED_PUBLIC_IGNORE = VERSION < v"1.11" ? (:init, :ismutable) : ()
-
-run_qa(
-    SymbolicIndexingInterface;
-    ei_kwargs = (;
-        all_qualified_accesses_are_public = (; ignore = QUALIFIED_PUBLIC_IGNORE),
-        # `similar_type` is a documented StaticArraysCore extension point, but its
-        # owning package does not yet export or declare it public.
-        all_explicit_imports_are_public = (; ignore = (:similar_type,)),
-    ),
-)
+run_qa(SymbolicIndexingInterface)
