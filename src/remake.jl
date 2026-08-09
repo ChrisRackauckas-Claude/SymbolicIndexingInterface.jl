@@ -49,7 +49,7 @@ function remake_buffer(sys, oldbuffer::AbstractArray, idxs, vals)
         end
     else
         mutbuffer = remake_buffer(sys, collect(oldbuffer), idxs, vals)
-        newbuffer = map((_, value) -> value, oldbuffer, mutbuffer)
+        newbuffer = similar_type(oldbuffer, eltype(mutbuffer))(mutbuffer)
     end
     return newbuffer
 end

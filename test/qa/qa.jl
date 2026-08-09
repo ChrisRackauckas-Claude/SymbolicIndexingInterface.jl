@@ -12,4 +12,9 @@ using PrettyTables
     @test Base.get_extension(SymbolicIndexingInterface, :SymbolicIndexingInterfacePrettyTablesExt) !== nothing
 end
 
-run_qa(SymbolicIndexingInterface)
+run_qa(
+    SymbolicIndexingInterface;
+    ei_kwargs = (;
+        all_explicit_imports_are_public = (; ignore = (:similar_type,)),
+    ),
+)
