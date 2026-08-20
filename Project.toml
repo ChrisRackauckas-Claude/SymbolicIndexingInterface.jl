@@ -6,6 +6,7 @@ authors = ["Aayush Sabharwal <aayush.sabharwal@gmail.com> and contributors"]
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
 ArrayInterface = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
 
@@ -22,6 +23,7 @@ Aqua = "0.8"
 ArrayInterface = "7.26"
 JET = "0.9, 0.10, 0.11"
 PrettyTables = "3"
+PrecompileTools = "1.2.1"
 RuntimeGeneratedFunctions = "0.5.21"
 SafeTestsets = "0.1"
 SciMLTesting = "2.4"
