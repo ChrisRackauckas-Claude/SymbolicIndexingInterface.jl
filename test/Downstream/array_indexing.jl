@@ -12,7 +12,7 @@ ev = SymbolicContinuousCallback(
 )
 @test is_timeseries_parameter(sys, q)
 @test !is_timeseries_parameter(sys, p)
-@test !is_parameter(sys, r)
+@test is_parameter(sys, r)
 @test is_parameter(sys, r[1])
 @test is_parameter(sys, r[2])
 
